@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zebox/registry-admin/app/registry"
-	"github.com/zebox/registry-admin/app/store"
-	"github.com/zebox/registry-admin/app/store/engine"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/zebox/registry-admin/app/registry"
+	"github.com/zebox/registry-admin/app/store"
+	"github.com/zebox/registry-admin/app/store/engine"
 
 	log "github.com/go-pkgz/lgr"
 )
@@ -95,15 +96,21 @@ func (ds *DataService) doSyncRepositories(ctx context.Context) {
 					for _, tag := range tags.Tags {
 						log.Printf("[DEBUG] Tag name: %s\n", tag)
 						manifest, errManifest := ds.Registry.Manifest(ctx, repo, tag)
+						var rawManifestData []byte
 						if errManifest != nil {
 							log.Printf("[ERROR] failed to fetch manifest from repo '%s' for tag '%s' errCatalog: %s", repo, tag, errManifest)
-							log.Printf("[ERROR] sync operation aborted")
-							return
-						}
-						log.Printf("[DEBUG] Manifest: %v\n", manifest)
-						rawManifestData, errMarshal := json.Marshal(&manifest)
-						if errMarshal != nil {
-							log.Printf("[ERROR] failed to marshal manifest data from repo '%s' for tag '%s' errCatalog: %s", repo, tag, errMarshal)
+							log.Printf("[ERROR] skip this tag: %s:%s", repo, tag)
+							manifest.ContentDigest = tag
+							manifest.ConfigDescriptor.Digest = tag
+							manifest.TotalSize = 0
+							rawManifestData = []byte(fmt.Sprintf(`{"content_digest": "%s", "error": "%s"}`, tag, errManifest))
+						} else {
+							log.Printf("[DEBUG] Manifest: %v\n", manifest)
+							var errMarshal error
+							rawManifestData, errMarshal = json.Marshal(&manifest)
+							if errMarshal != nil {
+								log.Printf("[ERROR] failed to marshal manifest data from repo '%s' for tag '%s' errCatalog: %s", repo, tag, errMarshal)
+							}
 						}
 
 						entry := &store.RegistryEntry{
@@ -118,8 +125,8 @@ func (ds *DataService) doSyncRepositories(ctx context.Context) {
 						if errCreate := ds.Storage.CreateRepository(ctx, entry); errCreate != nil {
 							if !strings.HasPrefix(errCreate.Error(), "UNIQUE") {
 								log.Printf("[ERROR] failed to marshal manifest data from repo '%s' for tag '%s' err: %s", repo, tag, errCreate)
-								log.Printf("[ERROR] sync operation aborted")
-								return
+								log.Printf("[ERROR] skip this tag: %s:%s", repo, tag)
+								continue
 							}
 
 							// if repositories with specific tag already exist the service try update dynamic field and set a new timestamp.
