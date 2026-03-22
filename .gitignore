@@ -1,7 +1,8 @@
 .idea
 frontend/yarn.lock
 app/web/*
-bin/
+runtime/
+
 certs/
 web/
 dist/

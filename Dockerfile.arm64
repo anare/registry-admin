@@ -38,6 +38,10 @@ RUN \
     go build -o runtime/bin/linux/arm64/registry-admin -ldflags "-X main.version=${version} -s -w" ./app/main.go
 
 
+# export stage: used by `docker buildx build --output` to place the binary on the host
+FROM scratch as export
+COPY --from=backend /build/runtime/bin/linux/arm64/registry-admin runtime/bin/linux/arm64/registry-admin
+
 FROM umputun/baseimage:app-v1.9.2
 
 ENV TIME_ZONE=UTC
