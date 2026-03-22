@@ -1,0 +1,62 @@
+# build the web UI
+FROM node:16-alpine as frontend
+
+ARG CI
+
+ADD . /build
+WORKDIR /build/frontend
+
+RUN \
+    if [ -z "$CI" ] ; then \
+    echo "build frontend outside of CI" && yarn && yarn build; \
+    else echo "build frontend in CI" && ls -la build; fi
+
+# build the backend registry-admin for linux/arm64
+FROM --platform=linux/arm64 golang:1.19-alpine as backend
+
+ARG GIT_BRANCH
+ARG GITHUB_SHA
+ARG CI
+
+ENV GOFLAGS="-mod=vendor"
+ENV CGO_ENABLED=1
+ENV GOOS=linux
+ENV GOARCH=arm64
+
+ADD . /build
+COPY --from=frontend /build/frontend/build  /build/app/web
+
+RUN apk add --no-cache --update git tzdata ca-certificates build-base
+
+WORKDIR /build
+
+RUN \
+    if [ -z "$CI" ] ; then \
+    echo "runs outside of CI" && version=$(git rev-parse --abbrev-ref HEAD)-$(git log -1 --format=%h)-$(date +%Y%m%dT%H:%M:%S); \
+    else version=${GIT_BRANCH}-${GITHUB_SHA:0:7}-$(date +%Y%m%dT%H:%M:%S); fi && \
+    echo "version=$version" && \
+    go build -o runtime/bin/linux/arm64/registry-admin -ldflags "-X main.version=${version} -s -w" ./app/main.go
+
+
+FROM umputun/baseimage:app-v1.9.2
+
+ENV TIME_ZONE=UTC
+
+LABEL org.opencontainers.image.authors="zebox <zebox@ya.ru>" \
+      org.opencontainers.image.description="Registry administartion UI tool" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/zebox/registry-admin.git" \
+      org.opencontainers.image.title="Registry Admin" \
+      org.opencontainers.image.url="https://github.com/zebox/registry-admin"
+
+COPY --from=backend /build/runtime/bin/linux/arm64/registry-admin /app/registry-admin
+
+WORKDIR /app
+
+RUN chown -R app:app /app
+RUN ln -s /app/registry-admin /usr/bin/registry-admin
+
+EXPOSE 80
+EXPOSE 443
+
+CMD ["/app/registry-admin"]

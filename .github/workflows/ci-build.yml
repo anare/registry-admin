@@ -10,6 +10,7 @@ on:
       - "frontend/**"
       - ".dockerignore"
       - "Dockerfile"
+      - "Dockerfile.arm64"
       - "!**.md"
 
   pull_request:
@@ -19,6 +20,7 @@ on:
       - "frontend/**"
       - ".dockerignore"
       - "Dockerfile"
+      - "Dockerfile.arm64"
       - "!**.md"
 
 jobs:
