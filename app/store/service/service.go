@@ -90,7 +90,13 @@ func (ds *DataService) doSyncRepositories(ctx context.Context) {
 				if errTags != nil && !errors.Is(errTags, registry.ErrNoMorePages) {
 					log.Printf("[ERROR] failed to get repository tags at repository '%s': %v", repo, errTags)
 					log.Printf("[ERROR] skip this repository: %s", repo)
-					continue
+					tags = registry.ImageTags{
+						Name: repo,
+						Tags: []string{
+							"-",
+						},
+						NextLink: "",
+					}
 				}
 
 				totalTags += uint64(len(tags.Tags))
@@ -101,18 +107,45 @@ func (ds *DataService) doSyncRepositories(ctx context.Context) {
 						manifestList, errManifestList := ds.Registry.ManifestList(ctx, repo, tag)
 						if errManifestList != nil {
 							log.Printf("[ERROR] failed to fetch manifest-list from repo '%s' for tag '%s' errCatalog: %s", repo, tag, errManifestList)
-							log.Printf("[ERROR] skip this tag: %s:%s", repo, tag)
+							log.Printf("[ERROR] ManifestList skip this tag: %s:%s", repo, tag)
+							manifestList = registry.ManifestListSchema{
+								SchemaVersion: 0,
+								MediaType:     "not_exists_type",
+								Manifests: []registry.ManifestListSchemaItem{
+									{
+										MediaType: "not_exists_type",
+										Size:      0,
+										Digest:    tag,
+										Platform: registry.ManifestPlatform{
+											OS:           "unknown",
+											Architecture: "unknown",
+										},
+									},
+								},
+								TotalSize:     0,
+								ContentDigest: "",
+							}
 						}
 						// log.Printf("[ERROR] %v", manifestList)
 						for _, m := range manifestList.Manifests {
 							log.Printf("[DEBUG] Manifest: %v\n", m)
-							manifest, errManifest := ds.Registry.Manifest(ctx, repo, m.Digest, m)
+							var manifest registry.ManifestSchemaV2
+							var errManifest error
+							if m.MediaType == "not_exists_type" {
+								errManifest = errors.New("manifest list not exists")
+							} else {
+								manifest, errManifest = ds.Registry.Manifest(ctx, repo, m.Digest, m)
+							}
 							var rawManifestData []byte
 							if errManifest != nil {
 								log.Printf("[ERROR] failed to fetch manifest from repo '%s' for tag '%s' errCatalog: %s", repo, tag, errManifest)
-								log.Printf("[ERROR] skip this tag: %s:%s", repo, tag)
+								log.Printf("[ERROR] Manifest: skip this tag: %s:%s", repo, tag)
+								manifest.MediaType = m.MediaType
+								manifest.ContentDigest = m.Digest
 								manifest.ConfigDescriptor.Digest = m.Digest
-								manifest.TotalSize = 0
+								manifest.TotalSize = m.Size
+								manifest.Platform.OS = m.Platform.OS
+								manifest.Platform.Architecture = m.Platform.Architecture
 								rawManifestData = []byte(fmt.Sprintf(`{"error": "%s", "tag": "%s", "os": "%s", "arch": "%s", "digest": "%s"}`, errManifest, tag, m.Platform.OS, m.Platform.Architecture, m.Digest))
 							} else {
 								log.Printf("[DEBUG] Manifest: %v\n", manifest)
@@ -139,8 +172,8 @@ func (ds *DataService) doSyncRepositories(ctx context.Context) {
 							}
 							if errCreate := ds.Storage.CreateRepository(ctx, entry); errCreate != nil {
 								if !strings.HasPrefix(errCreate.Error(), "UNIQUE") {
-									log.Printf("[ERROR] failed to marshal manifest data from repo '%s' for tag '%s' err: %s", repo, tag, errCreate)
-									log.Printf("[ERROR] skip this tag: %s:%s", repo, tag)
+									log.Printf("[ERROR] errCreate: failed to marshal manifest data from repo '%s' for tag '%s' err: %s", repo, tag, errCreate)
+									log.Printf("[ERROR] errCreate: skip this tag: %s:%s", repo, tag)
 									continue
 								}
 
@@ -160,7 +193,7 @@ func (ds *DataService) doSyncRepositories(ctx context.Context) {
 
 								if errUpdate := ds.Storage.UpdateRepository(ctx, condition, fieldForUpdate); errUpdate != nil {
 									if errUpdate.Error() != "record didn't update" {
-										log.Printf("[ERROR] storage update failed for repo '%s' and tag '%s' with error: %v, error on create: %v", repo, tag, errUpdate, errCreate)
+										log.Printf("[ERROR] errUpdate: storage update failed for repo '%s' and tag '%s' with error: %v, error on create: %v", repo, tag, errUpdate, errCreate)
 									}
 									continue
 								}

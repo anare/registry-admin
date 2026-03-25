@@ -392,7 +392,7 @@ func (r *Registry) Catalog(ctx context.Context, n, last string) (Repositories, e
 		return repos, fmt.Errorf("api return error code: %d", resp.StatusCode)
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&repos)
+	err = r.readJson(resp, &repos)
 	if err != nil {
 		return repos, err
 	}
@@ -431,7 +431,7 @@ func (r *Registry) ListingImageTags(ctx context.Context, repoName, n, last strin
 		return tags, fmt.Errorf("api return error code: %d", resp.StatusCode)
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&tags)
+	err = r.readJson(resp, &tags)
 	if err != nil {
 		return tags, err
 	}
@@ -488,9 +488,7 @@ func (r *Registry) Manifest(ctx context.Context, repoName, childDigest string, m
 		return manifest, apiError
 	}
 
-	raw, _ := io.ReadAll(resp.Body) // read body for avoid error with unread response body and close connection
-	err = json.Unmarshal(raw, &manifest)
-	// err = json.NewDecoder(resp.Body).Decode(&manifest)
+	err = r.readJson(resp, &manifest)
 	if err != nil {
 		return manifest, createAPIError("failed to parse request body with manifest data", err.Error())
 	}
@@ -520,7 +518,7 @@ func (r *Registry) ManifestList(ctx context.Context, repoName, tag string) (Mani
 
 	if resp.StatusCode >= 400 {
 		if resp != nil {
-			err = json.NewDecoder(resp.Body).Decode(&apiError)
+			err = r.readJson(resp, &apiError)
 			if err != nil {
 				return manifest, createAPIError("failed to parse request body with manifest fetch error", err.Error())
 			}
@@ -531,7 +529,7 @@ func (r *Registry) ManifestList(ctx context.Context, repoName, tag string) (Mani
 		return manifest, apiError
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&manifest)
+	err = r.readJson(resp, &manifest)
 	if err != nil {
 		return manifest, createAPIError("failed to parse request body with manifest data", err.Error())
 	}
@@ -540,6 +538,18 @@ func (r *Registry) ManifestList(ctx context.Context, repoName, tag string) (Mani
 	manifest.ContentDigest = resp.Header.Get(contentDigestHeader)
 
 	return manifest, nil
+}
+
+func (r *Registry) readJson(resp *http.Response, o any) error {
+	all, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	// log.Printf("Accept %s", resp.Request.Header.Get("Accept"))
+	// log.Printf("URL %s", resp.Request.URL.String())
+	// log.Print(string(all))
+	err = json.Unmarshal(all, &o)
+	return err
 }
 
 // DeleteTag will delete the manifest identified by name and reference. Note that a manifest can only be deleted by digest.
@@ -561,7 +571,7 @@ func (r *Registry) DeleteTag(ctx context.Context, repoName, digest string) error
 
 	if resp.StatusCode >= 400 {
 		if resp != nil {
-			err = json.NewDecoder(resp.Body).Decode(&apiError)
+			err = r.readJson(resp, &apiError)
 			if err != nil {
 				return createAPIError("failed to parse request body when manifest delete", err.Error())
 			}
